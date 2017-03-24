@@ -38,9 +38,11 @@ i = 1
 new_features_list = ['poi']
 for importance in model.feature_importances_:
     if importance >= 0.08:
+        #print features_list[i]
         new_features_list.append(features_list[i])
     i = i + 1
-# Most important features selected are: total_payments, exercised_stock_options, bonus, deferred_income
+# Most important features selected are: total_payments, exercised_stock_options, bonus, deferred_income, expenses
+# and from_this_person_to_poi
 
 features_list = new_features_list
 
@@ -80,10 +82,17 @@ pred = reg.predict(np.transpose(np.matrix(total_payments)))
 # Calculating the error
 pred_error = abs(pred - np.transpose(np.matrix(total_payments)))
 pred_error = pred_error.tolist()
+## Remove 7% of the records with maximum errors
+error_index_array = []
+for i in range(int(len(total_payments)*0.07)):
+    index = pred_error.index(max(pred_error))
+    error_index_array.append(index)
+    del pred_error[index]
 ## Remove 2 outliers:
 ## THE TRAVEL AGENCY IN THE PARK
 ## TOTAL
-error_index_array = [101, 98]
+error_index_array.append(101)
+error_index_array.append(98)
 invalid_keys.append('THE TRAVEL AGENCY IN THE PARK')
 invalid_keys.append('TOTAL')
 
@@ -97,9 +106,11 @@ for i in error_index_array:
     del from_this_to_poi[i]
     del from_poi_to_this[i]
 
+index = 0
 for key in data_dict.keys():
-    if key in invalid_keys:
+    if key in invalid_keys or index in error_index_array:
         del data_dict[key]
+    index = index + 1
 
 data = []
 
@@ -122,13 +133,57 @@ for i in range(len(poi)):
 # Use a PCA to create three new features
 from sklearn.decomposition import PCA
 from sklearn.preprocessing import scale
+import matplotlib.pyplot as plt
+import pandas as pd
+import numpy as np
+
+def pca_results(features_list, pca):
+    '''
+    Create a DataFrame of the PCA results
+    Includes dimension feature weights and explained variance
+    Visualizes the PCA results
+    Usage: `pca_results(features_list[1:], pca_object)`
+    '''
+
+    # Dimension indexing
+    dimensions = dimensions = ['Dimension {}'.format(i) for i in range(1,len(pca.components_)+1)]
+
+    # PCA components
+    components = pd.DataFrame(np.round(pca.components_, 4), columns = features_list)
+    components.index = dimensions
+
+    # PCA explained variance
+    ratios = pca.explained_variance_ratio_.reshape(len(pca.components_), 1)
+    variance_ratios = pd.DataFrame(np.round(ratios, 4), columns = ['Explained Variance'])
+    variance_ratios.index = dimensions
+
+    # Create a bar plot visualization
+    plt.figure(figsize=(16,8))
+    ax = plt.subplot2grid((10,8), (0, 0), colspan=7, rowspan=8)
+
+    # Plot the feature weights as a function of the components
+    components.plot(ax = ax, kind = 'bar');
+    ax.set_ylabel("Feature Weights")
+    ax.set_xticklabels(dimensions, rotation=0)
+    plt.legend(bbox_to_anchor=(1.02, 1), loc=2, borderaxespad=0.)
+
+
+    # Display the explained variance ratios
+    for i, ev in enumerate(pca.explained_variance_ratio_):
+        ax.text(i-0.40, ax.get_ylim()[1] + 0.05, "Exp. Var.\n%.4f"%(ev))
+
+    plt.show()
+    # Return a concatenated DataFrame
+    return pd.concat([variance_ratios, components], axis = 1)
 
 # PCA without scaled data
 pca = PCA(n_components=3, svd_solver='auto')
 new_data = pca.fit_transform(data, poi)
 
+pca_results(['total_payments','exercised_stock_options','bonus','deferred_income'],pca)
+
 # Create PCA with scaled data
-pca = PCA(n_components=3, svd_solver='auto')
+pca = PCA(n_components=4, svd_solver='auto')
 new_data_scaled = pca.fit_transform(scale(data), poi)
 
 ##Add PCA features to data dictionary
@@ -236,17 +291,21 @@ test_classifier(clf,new_data,poi)
 ### http://scikit-learn.org/stable/modules/generated/sklearn.cross_validation.StratifiedShuffleSplit.html
 
 #Using Grid Search to estimate the best n_estimators parameter
-#from sklearn.model_selection import GridSearchCV
-#parameters = {'min_samples_split': range(2,10), 'min_samples_leaf':range(1,10)}
-#grid_search = GridSearchCV(clf, param_grid=parameters)
+from sklearn.model_selection import GridSearchCV
+parameters = {'min_samples_split': range(2,10), 'min_samples_leaf':range(1,10)}
+
+from sklearn.model_selection import StratifiedShuffleSplit
+cv = StratifiedShuffleSplit(n_splits=10, test_size=0.4, random_state=42)
+
+grid_search = GridSearchCV(clf, param_grid=parameters, cv = cv, scoring='recall')
 #grid_search.fit(new_data, poi)
 #print(grid_search.best_estimator_)
 
 #Result from Grid Search:
 #RandomForestClassifier(bootstrap=True, class_weight=None, criterion='gini',
 #            max_depth=None, max_features='auto', max_leaf_nodes=None,
-#            min_impurity_split=1e-07, min_samples_leaf=2,
-#            min_samples_split=9, min_weight_fraction_leaf=0.0,
+#            min_impurity_split=1e-07, min_samples_leaf=1,
+#            min_samples_split=3, min_weight_fraction_leaf=0.0,
 #            n_estimators=110, n_jobs=1, oob_score=False, random_state=42,
 #            verbose=0, warm_start='true')
 
